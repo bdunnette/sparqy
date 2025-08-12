@@ -6,10 +6,16 @@ import argparse
 
 import ibis
 import pyodbc
-from dotenv import load_dotenv
+import environ
 from slugify import slugify
 
 logger = getLogger(__name__)
+BASE_DIR = Path(__file__).resolve().parent
+env = environ.Env(
+    # set casting, default value
+    DEBUG=(bool, False)
+)
+environ.Env.read_env(env_file=BASE_DIR / ".env")
 
 
 def parse_args():
@@ -18,7 +24,6 @@ def parse_args():
     Returns:
         Namespace: Parsed arguments.
     """
-    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Process SQL file and save to parquet."
     )
@@ -40,75 +45,73 @@ def parse_args():
     parser.add_argument(
         "--trusted_connection",
         type=bool,
-        default=os.getenv("TRUSTED_CONNECTION", True),
+        default=env.bool("TRUSTED_CONNECTION", default=True),
         help="Use trusted connection",
     )
     parser.add_argument(
         "--sql_file",
         type=str,
-        default=os.getenv("SQL_FILE", "trial_inventory.sql"),
+        default=env("SQL_FILE", default="trial_inventory.sql"),
         help="SQL file to execute",
     )
     parser.add_argument(
         "--trial_code",
         type=str,
-        default=os.getenv("TRIAL_CODE", "COVID BRAIN"),
+        default=env("TRIAL_CODE", default=None),
         help="Trial code to filter the data",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=os.getenv(
-            "OUTPUT_DIR", "G:\\Shared drives\\ARDL Biorepository\\Studies"
-        ),
+        default=env("OUTPUT_DIR", default=Path.home() / "sparqy" / "output"),
         help="Output directory for the parquet file",
     )
     parser.add_argument(
         "--add_trial_to_path",
         action="store_true",
-        default=os.getenv("ADD_TRIAL_TO_PATH", False),
+        default=env.bool("ADD_TRIAL_TO_PATH", False),
         help="Add trial code to the output path",
     )
     parser.add_argument(
         "--include_dsn_in_filename",
         action="store_true",
-        default=os.getenv("INCLUDE_DSN_IN_FILENAME", False),
+        default=env.bool("INCLUDE_DSN_IN_FILENAME", False),
         help="Include DSN in the filename",
     )
     parser.add_argument(
         "--no_viable",
         action="store_true",
-        default=os.getenv("NO_VIABLE", False),
+        default=env.bool("NO_VIABLE", False),
         help="Don't try to flag non-viable samples",
     )
     parser.add_argument(
         "--exclude_conditions",
         nargs="+",
-        default=os.getenv("EXCLUDE_CONDITIONS", "SNR, QNSR, QNS, NSI").split(","),
+        default=env.list("EXCLUDE_CONDITIONS", default=["SNR", "QNSR", "QNS", "NSI"]),
         help="List of conditions to exclude",
     )
     parser.add_argument(
         "--exclude_matcodes",
         nargs="+",
-        default=os.getenv("EXCLUDE_MATCODES", "100x100Box").split(","),
+        default=env.list("EXCLUDE_MATCODES", default=["100x100Box", None]),
         help="List of matcodes to exclude",
     )
     parser.add_argument(
         "--parquet_compression",
         type=str,
-        default=os.getenv("PARQUET_COMPRESSION", "zstd"),
+        default=env("PARQUET_COMPRESSION", default="zstd"),
         help="Parquet compression type",
     )
     parser.add_argument(
         "--db_driver",
         type=str,
-        default=os.getenv("DB_DRIVER", pyodbc.drivers()[0]),
+        default=env("DB_DRIVER", default=pyodbc.drivers()[0]),
         help="Database driver",
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        default=os.getenv("DEBUG", False),
+        default=env.bool("DEBUG", default=False),
         help="Enable debug mode",
     )
 
@@ -148,6 +151,9 @@ def parse_sql_file(sql_file, trial_code):
 
 
 def flag_viable(df, exclude_conditions, exclude_matcodes):
+    logging.info(
+        f"Flagging non-viable specimens based on conditions: {exclude_conditions} and matcodes: {exclude_matcodes}"
+    )
     # Assume all specimens are viable initially
     df["VIABLE"] = True
     # Define conditions for non-viable specimens
@@ -157,9 +163,6 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
         & ~df["Sample Condition"].isin(exclude_conditions)
         & ~df["AMOUNTLEFT"].isnull()
         & ~df["AMOUNTLEFT"].le(0)
-    )
-    logging.info(
-        f"Flagging non-viable specimens based on conditions: {exclude_conditions} and matcodes: {exclude_matcodes}"
     )
     not_viable = df[~df["VIABLE"]]
     not_viable_count = not_viable.shape[0]
@@ -221,6 +224,9 @@ def main(
         trusted_connection=trusted_connection,
         db_driver=db_driver,
     )
+    if not trial_code:
+        logger.error("No trial code provided.")
+        return
     sql = parse_sql_file(sql_file, trial_code)
     trial_inventory = con.sql(sql).execute()
     trial_inventory = extract_sampleid(trial_inventory)
