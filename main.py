@@ -38,61 +38,65 @@ def parse_args():
         "--db_port", type=int, default=os.getenv("DB_PORT", 1433), help="Database port"
     )
     parser.add_argument(
-        "--trusted_connection", type=bool, default=True, help="Use trusted connection"
+        "--trusted_connection",
+        type=bool,
+        default=os.getenv("TRUSTED_CONNECTION", True),
+        help="Use trusted connection",
     )
     parser.add_argument(
         "--sql_file",
         type=str,
-        default="trial_inventory.sql",
+        default=os.getenv("SQL_FILE", "trial_inventory.sql"),
         help="SQL file to execute",
     )
     parser.add_argument(
         "--trial_code",
         type=str,
-        default="COVID BRAIN",
+        default=os.getenv("TRIAL_CODE", "COVID BRAIN"),
         help="Trial code to filter the data",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="G:\\Shared drives\\ARDL Biorepository\\Studies",
+        default=os.getenv(
+            "OUTPUT_DIR", "G:\\Shared drives\\ARDL Biorepository\\Studies"
+        ),
         help="Output directory for the parquet file",
     )
     parser.add_argument(
         "--add_trial_to_path",
         action="store_true",
+        default=os.getenv("ADD_TRIAL_TO_PATH", False),
         help="Add trial code to the output path",
     )
     parser.add_argument(
         "--include_dsn_in_filename",
         action="store_true",
+        default=os.getenv("INCLUDE_DSN_IN_FILENAME", False),
         help="Include DSN in the filename",
     )
     parser.add_argument(
-        "--no_viable", action="store_true", help="Don't try to flag non-viable samples"
+        "--no_viable",
+        action="store_true",
+        default=os.getenv("NO_VIABLE", False),
+        help="Don't try to flag non-viable samples",
     )
     parser.add_argument(
         "--exclude_conditions",
         nargs="+",
-        default=["SNR", "QNSR", "QNS", "NSI"],
+        default=os.getenv("EXCLUDE_CONDITIONS", "SNR, QNSR, QNS, NSI").split(","),
         help="List of conditions to exclude",
     )
     parser.add_argument(
         "--exclude_matcodes",
         nargs="+",
-        default=[None, "100x100Box"],
+        default=os.getenv("EXCLUDE_MATCODES", "100x100Box").split(","),
         help="List of matcodes to exclude",
-    )
-    parser.add_argument(
-        "--category_columns",
-        nargs="+",
-        default=None,
-        help="List of columns to convert to category type",
     )
     parser.add_argument(
         "--parquet_compression",
         type=str,
-        default="zstd",
+        default=os.getenv("PARQUET_COMPRESSION", "zstd"),
         help="Parquet compression type",
     )
     parser.add_argument(
@@ -106,12 +110,6 @@ def parse_args():
         action="store_true",
         default=os.getenv("DEBUG", False),
         help="Enable debug mode",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        default=os.getenv("VERBOSE", False),
-        help="Enable verbose mode",
     )
 
     return parser.parse_args()
@@ -155,11 +153,11 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
     df["VIABLE"] = True
     # Define conditions for non-viable specimens
     df["VIABLE"] = (
-        df["MATCODE"].is_in(exclude_matcodes)
-        | df["RECEIVEDCONDITION"].is_in(exclude_conditions)
-        | df["Sample Condition"].is_in(exclude_conditions)
-        | df["AMOUNTLEFT"].is_null()
-        | df["AMOUNTLEFT"].le(0)
+        ~df["MATCODE"].isin(exclude_matcodes)
+        & ~df["RECEIVEDCONDITION"].isin(exclude_conditions)
+        & ~df["Sample Condition"].isin(exclude_conditions)
+        & ~df["AMOUNTLEFT"].isnull()
+        & ~df["AMOUNTLEFT"].le(0)
     )
     logging.info(
         f"Flagging non-viable specimens based on conditions: {exclude_conditions} and matcodes: {exclude_matcodes}"
@@ -212,11 +210,9 @@ def main(
     no_viable,
     exclude_conditions,
     exclude_matcodes,
-    category_columns,
     parquet_compression,
     db_driver,
     debug=False,
-    verbose=False,
 ):
     basicConfig(level=INFO if not debug else DEBUG)
     logger.info(f"Connecting to {db_host}:{db_port}/{db_name}")
@@ -229,7 +225,10 @@ def main(
     )
     sql = parse_sql_file(sql_file, trial_code)
     trial_inventory = con.sql(sql).execute()
-    # trial_inventory = flag_viable(trial_inventory, exclude_conditions, exclude_matcodes)
+    if not no_viable:
+        trial_inventory = flag_viable(
+            trial_inventory, exclude_conditions, exclude_matcodes
+        )
     trial_inventory = extract_sampleid(trial_inventory)
 
     final_parquet_file_path = parquet_path(
@@ -260,9 +259,7 @@ if __name__ == "__main__":
         no_viable=args.no_viable,
         exclude_conditions=args.exclude_conditions,
         exclude_matcodes=args.exclude_matcodes,
-        category_columns=args.category_columns,
         parquet_compression=args.parquet_compression,
         db_driver=args.db_driver,
         debug=args.debug,
-        verbose=args.verbose,
     )
