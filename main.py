@@ -148,7 +148,6 @@ def parse_sql_file(sql_file, trial_code):
 
 
 def flag_viable(df, exclude_conditions, exclude_matcodes):
-    logging.debug("Adding VIABLE column based on conditions.")
     # Assume all specimens are viable initially
     df["VIABLE"] = True
     # Define conditions for non-viable specimens
@@ -175,7 +174,6 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
 
 def extract_sampleid(df):
     df["SAMPLEID"] = df["Comments"].str.extract(r"SAMPLEID:(.*?),")
-    logging.debug("SAMPLEID column extracted from Comments.")
     return df
 
 
