@@ -225,6 +225,8 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
     # Define conditions for non-viable specimens
     df["VIABLE"] = (
         ~df["MATCODE"].isin(exclude_matcodes)
+        # NA MATCODE indicates specimen is not allocated to storage box
+        & ~df["MATCODE"].isna()
         & ~df["RECEIVEDCONDITION"].isin(exclude_conditions)
         & ~df["Sample Condition"].isin(exclude_conditions)
         & ~df["AMOUNTLEFT"].isnull()
