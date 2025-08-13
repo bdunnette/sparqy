@@ -4,8 +4,9 @@ from pathlib import Path
 from logging import basicConfig, INFO, DEBUG, getLogger
 import argparse
 
-import ibis
 import pyodbc
+import sqlalchemy as sa
+import pandas as pd
 import environ
 from slugify import slugify
 
@@ -30,17 +31,29 @@ def parse_args():
     parser.add_argument(
         "--db_host",
         type=str,
-        default=os.getenv("DB_HOST", "starlimsdb2019.ahc.umn.edu"),
+        default=os.getenv("DB_HOST", None),
         help="Database host",
     )
     parser.add_argument(
         "--db_name",
         type=str,
-        default=os.getenv("DB_NAME", "lsprod_data"),
+        default=os.getenv("DB_NAME", None),
         help="Database name",
     )
     parser.add_argument(
-        "--db_port", type=int, default=os.getenv("DB_PORT", 1433), help="Database port"
+        "--db_port", type=int, default=os.getenv("DB_PORT", 1443), help="Database port"
+    )
+    parser.add_argument(
+        "--db_user",
+        type=str,
+        default=os.getenv("DB_USER", None),
+        help="Database username",
+    )
+    parser.add_argument(
+        "--db_password",
+        type=str,
+        default=os.getenv("DB_PASSWORD", None),
+        help="Database password",
     )
     parser.add_argument(
         "--trusted_connection",
@@ -118,18 +131,57 @@ def parse_args():
     return parser.parse_args()
 
 
-def connect_mssql(db_host, db_name, db_port, trusted_connection, db_driver):
+def connect_mssql(db_host, db_name, db_port, db_driver, db_user=None, db_password=None):
     """
     Connect to the SQL Server database.
     """
-    con = ibis.mssql.connect(
-        host=db_host,
-        port=db_port,
-        database=db_name,
-        driver=db_driver,
-        trusted_connection=trusted_connection,
-    )
-    return con
+    logger.info(f"Connecting to {db_host}:{db_port}/{db_name} with driver {db_driver}")
+    try:
+        # if not db_user or not db_password:
+        #     logger.debug("Using trusted connection.")
+        #     con = ibis.mssql.connect(
+        #         host=db_host,
+        #         port=db_port,
+        #         database=db_name,
+        #         driver=db_driver,
+        #         TrustServerCertificate="yes",
+        #     )
+        # else:
+        #     logger.debug("Using username and password for connection.")
+        #     con = ibis.mssql.connect(
+        #         host=db_host,
+        #         port=db_port,
+        #         database=db_name,
+        #         driver=db_driver,
+        #         user=db_user,
+        #         password=db_password
+        #     )
+        pyodbc.pooling = False
+        connection_string = (
+            f"DRIVER={db_driver};SERVER={db_host};PORT={db_port};DATABASE={db_name};"
+        )
+        if db_user is None or db_password is None:
+            logger.debug("Using trusted connection.")
+            connection_string += "Trusted_Connection=yes;"
+        else:
+            logger.debug("Using username and password for connection.")
+            connection_string += f"UID={db_user};PWD={db_password};"
+        connection_url = sa.engine.URL.create(
+            drivername="mssql+pyodbc",
+            username=db_user,
+            password=db_password,
+            host=db_host,
+            port=db_port,
+            database=db_name,
+            query={"odbc_connect": connection_string},
+        )
+        logger.debug(f"Connection URL: {connection_url}")
+        engine = sa.create_engine(connection_url)
+        logger.debug(f"Connection established: {connection_url}")
+        return engine
+    except Exception as e:
+        logger.error(f"Error connecting to database: {e}")
+        return None
 
 
 def parse_sql_file(sql_file, trial_code):
@@ -148,6 +200,20 @@ def parse_sql_file(sql_file, trial_code):
     else:
         logger.error(f"SQL file not found: {sql_file}")
         return
+
+
+def run_query(engine, query, as_dataframe=True):
+    """
+    Run the SQL query on the given SQLAlchemy engine and return the result as a DataFrame.
+    """
+    with engine.connect() as connection:
+        result = pd.read_sql(sql=query, con=connection)
+        if connection:
+            connection.close()
+    if as_dataframe:
+        return pd.DataFrame(data=result)
+    else:
+        return result
 
 
 def flag_viable(df, exclude_conditions, exclude_matcodes):
@@ -202,7 +268,8 @@ def main(
     db_host,
     db_name,
     db_port,
-    trusted_connection,
+    db_user,
+    db_password,
     sql_file,
     trial_code,
     output_dir,
@@ -216,36 +283,46 @@ def main(
     debug=False,
 ):
     basicConfig(level=INFO if not debug else DEBUG)
-    logger.info(f"Connecting to {db_host}:{db_port}/{db_name}")
-    con = connect_mssql(
-        db_host=db_host,
-        db_name=db_name,
-        db_port=db_port,
-        trusted_connection=trusted_connection,
-        db_driver=db_driver,
-    )
     if not trial_code:
         logger.error("No trial code provided.")
         return
-    sql = parse_sql_file(sql_file, trial_code)
-    trial_inventory = con.sql(sql).execute()
-    trial_inventory = extract_sampleid(trial_inventory)
-    if not no_viable:
-        trial_inventory = flag_viable(
-            trial_inventory, exclude_conditions, exclude_matcodes
+    try:
+        engine = connect_mssql(
+            db_host=db_host,
+            db_name=db_name,
+            db_port=db_port,
+            db_driver=db_driver,
+            db_user=db_user,
+            db_password=db_password,
+        )
+        logger.debug(f"SQL Connection established: {engine}")
+        query = parse_sql_file(sql_file, trial_code)
+        if not query:
+            logger.error("Failed to parse SQL file.")
+            return
+        logger.debug(f"SQL Query: {query}")
+        trial_inventory = run_query(engine, query)
+        trial_inventory = extract_sampleid(trial_inventory)
+        if not no_viable:
+            trial_inventory = flag_viable(
+                trial_inventory, exclude_conditions, exclude_matcodes
+            )
+
+        final_parquet_file_path = parquet_path(
+            trial_code=trial_code,
+            output_dir=output_dir,
+            include_dsn_in_filename=include_dsn_in_filename,
+            add_trial_to_path=add_trial_to_path,
         )
 
-    final_parquet_file_path = parquet_path(
-        trial_code=trial_code,
-        output_dir=output_dir,
-        include_dsn_in_filename=include_dsn_in_filename,
-        add_trial_to_path=add_trial_to_path,
-    )
-
-    trial_inventory.to_parquet(final_parquet_file_path, compression=parquet_compression)
-    logging.info(
-        f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
-    )
+        trial_inventory.to_parquet(
+            final_parquet_file_path, compression=parquet_compression
+        )
+        logging.info(
+            f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
+        )
+    except Exception as e:
+        logger.error(f"Error processing trial inventory: {e}")
 
 
 if __name__ == "__main__":
@@ -254,7 +331,8 @@ if __name__ == "__main__":
         db_host=args.db_host,
         db_name=args.db_name,
         db_port=args.db_port,
-        trusted_connection=args.trusted_connection,
+        db_user=args.db_user,
+        db_password=args.db_password,
         sql_file=args.sql_file,
         trial_code=args.trial_code,
         output_dir=args.output_dir,
