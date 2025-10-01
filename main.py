@@ -19,6 +19,9 @@ env = environ.Env(
 )
 environ.Env.read_env(env_file=BASE_DIR / ".env")
 
+DEFAULT_EXCLUDE_CONDITIONS = ["SNR", "QNSR", "QNS", "NSI"]
+DEFAULT_EXCLUDE_MATCODES = ["100x100Box", None]
+
 
 def parse_args():
     """
@@ -101,13 +104,13 @@ def parse_args():
     parser.add_argument(
         "--exclude_conditions",
         nargs="+",
-        default=env.list("EXCLUDE_CONDITIONS", default=["SNR", "QNSR", "QNS", "NSI"]),  # type: ignore
+        default=env.list("EXCLUDE_CONDITIONS", default=DEFAULT_EXCLUDE_CONDITIONS),  # type: ignore
         help="List of conditions to exclude",
     )
     parser.add_argument(
         "--exclude_matcodes",
         nargs="+",
-        default=env.list("EXCLUDE_MATCODES", default=["100x100Box", None]),  # type: ignore
+        default=env.list("EXCLUDE_MATCODES", default=DEFAULT_EXCLUDE_MATCODES),  # type: ignore
         help="List of matcodes to exclude",
     )
     parser.add_argument(
@@ -162,7 +165,11 @@ async def query_to_df(dsn, query):
     return df
 
 
-def flag_viable(df, exclude_conditions, exclude_matcodes):
+def flag_viable(
+    df,
+    exclude_conditions=DEFAULT_EXCLUDE_CONDITIONS,
+    exclude_matcodes=DEFAULT_EXCLUDE_MATCODES,
+):
     logging.info(
         f"Flagging non-viable specimens based on conditions: {exclude_conditions} and matcodes: {exclude_matcodes}"
     )
