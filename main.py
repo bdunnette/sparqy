@@ -59,73 +59,73 @@ def parse_args():
     parser.add_argument(
         "--trusted_connection",
         type=bool,
-        default=env.bool("TRUSTED_CONNECTION", default=True),
+        default=env.bool("TRUSTED_CONNECTION", default=True),  # type: ignore
         help="Use trusted connection",
     )
     parser.add_argument(
         "--sql_file",
         type=str,
-        default=env("SQL_FILE", default="trial_inventory.sql"),
+        default=env("SQL_FILE", default="trial_inventory.sql"),  # type: ignore
         help="SQL file to execute",
     )
     parser.add_argument(
         "--trial_code",
         type=str,
-        default=env("TRIAL_CODE", default=None),
+        default=env("TRIAL_CODE", default=None),  # type: ignore
         help="Trial code to filter the data",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default=env("OUTPUT_DIR", default=Path.home() / "sparqy" / "output"),
+        default=env("OUTPUT_DIR", default=Path.home() / "sparqy" / "output"),  # type: ignore
         help="Output directory for the parquet file",
     )
     parser.add_argument(
         "--add_trial_to_path",
         action="store_true",
-        default=env.bool("ADD_TRIAL_TO_PATH", False),
+        default=env.bool("ADD_TRIAL_TO_PATH", False),  # type: ignore
         help="Add trial code to the output path",
     )
     parser.add_argument(
         "--include_dsn_in_filename",
         action="store_true",
-        default=env.bool("INCLUDE_DSN_IN_FILENAME", False),
+        default=env.bool("INCLUDE_DSN_IN_FILENAME", False),  # type: ignore
         help="Include DSN in the filename",
     )
     parser.add_argument(
         "--no_viable",
         action="store_true",
-        default=env.bool("NO_VIABLE", False),
+        default=env.bool("NO_VIABLE", False),  # type: ignore
         help="Don't try to flag non-viable samples",
     )
     parser.add_argument(
         "--exclude_conditions",
         nargs="+",
-        default=env.list("EXCLUDE_CONDITIONS", default=["SNR", "QNSR", "QNS", "NSI"]),
+        default=env.list("EXCLUDE_CONDITIONS", default=["SNR", "QNSR", "QNS", "NSI"]),  # type: ignore
         help="List of conditions to exclude",
     )
     parser.add_argument(
         "--exclude_matcodes",
         nargs="+",
-        default=env.list("EXCLUDE_MATCODES", default=["100x100Box", None]),
+        default=env.list("EXCLUDE_MATCODES", default=["100x100Box", None]),  # type: ignore
         help="List of matcodes to exclude",
     )
     parser.add_argument(
         "--parquet_compression",
         type=str,
-        default=env("PARQUET_COMPRESSION", default="zstd"),
+        default=env("PARQUET_COMPRESSION", default="zstd"),  # type: ignore
         help="Parquet compression type",
     )
     parser.add_argument(
         "--db_driver",
         type=str,
-        default=env("DB_DRIVER", default=pyodbc.drivers()[0]),
+        default=env("DB_DRIVER", default=pyodbc.drivers()[0]),  # type: ignore
         help="Database driver",
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        default=env.bool("DEBUG", default=False),
+        default=env.bool("DEBUG", default=False),  # type: ignore
         help="Enable debug mode",
     )
 
