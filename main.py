@@ -212,6 +212,14 @@ def parquet_path(trial_code, output_dir, include_dsn_in_filename, add_trial_to_p
     return final_parquet_file_path
 
 
+def redact_dsn_password(dsn: str) -> str:
+    # Replace PWD=...; with PWD=****;
+    import re
+
+    # handles case like PWD=password123;
+    return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
+
+
 async def main(
     db_host,
     db_name,
@@ -246,7 +254,7 @@ async def main(
             dsn += f"UID={db_user};PWD={db_password};"
         else:
             dsn += "Trusted_Connection=yes;"
-        logger.info(f"Connecting to {dsn}")
+        logger.info(f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'")
         trial_inventory = await query_to_df(dsn, query)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
