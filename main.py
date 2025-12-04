@@ -174,8 +174,8 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
         ~df["MATCODE"].isin(exclude_matcodes)
         # NA MATCODE indicates specimen is not allocated to storage box
         & ~df["MATCODE"].isna()
-        & ~df["RECEIVEDCONDITION"].isin(exclude_conditions)
-        & ~df["Sample Condition"].isin(exclude_conditions)
+        & ~df["RECEIVED_CONDITION"].isin(exclude_conditions)
+        & ~df["SAMPLE_CONDITION"].isin(exclude_conditions)
         & ~df["AMOUNTLEFT"].isnull()
         & ~df["AMOUNTLEFT"].le(0)
     )
@@ -191,7 +191,7 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
 
 
 def extract_sampleid(df):
-    df["SAMPLEID"] = df["Comments"].str.extract(r"SAMPLEID:(.*?),")
+    df["SAMPLEID"] = df["COMMENTS"].str.extract(r"SAMPLEID:(.*?),")
     return df
 
 
