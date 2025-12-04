@@ -173,8 +173,8 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
         ~df["MATCODE"].isin(exclude_matcodes)
         # NA MATCODE indicates specimen is not allocated to storage box
         & ~df["MATCODE"].isna()
-        & ~df["RECEIVEDCONDITION"].isin(exclude_conditions)
-        & ~df["Sample Condition"].isin(exclude_conditions)
+        & ~df["RECEIVED_CONDITION"].isin(exclude_conditions)
+        & ~df["SAMPLE_CONDITION"].isin(exclude_conditions)
         & ~df["AMOUNTLEFT"].isnull()
         & ~df["AMOUNTLEFT"].le(0)
     )
@@ -190,7 +190,7 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
 
 
 def extract_sampleid(df):
-    df["SAMPLEID"] = df["Comments"].str.extract(r"SAMPLEID:(.*?),")
+    df["SAMPLEID"] = df["COMMENTS"].str.extract(r"SAMPLEID:(.*?),")
     return df
 
 
@@ -246,7 +246,9 @@ async def main(
             dsn += f"UID={db_user};PWD={db_password};"
         else:
             dsn += "Trusted_Connection=yes;"
-        logger.info(f"Connecting to {dsn}")
+        logger.info(
+            f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
+        )
         trial_inventory = await query_to_df(dsn, query)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
