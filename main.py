@@ -253,7 +253,8 @@ async def main(
             dsn += f"UID={db_user};PWD={db_password};"
         else:
             dsn += "Trusted_Connection=yes;"
-        logger.info(
+            dsn += "Trusted_Connection=yes;"
+        logger.debug(f"DSN: {redact_dsn_password(dsn)}")
             f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
         )
         trial_inventory = await query_to_df(dsn, query)
