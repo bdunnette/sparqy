@@ -254,7 +254,9 @@ async def main(
             dsn += f"UID={db_user};PWD={db_password};"
         else:
             dsn += "Trusted_Connection=yes;"
-        logger.info(f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'")
+        logger.info(
+            f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
+        )
         trial_inventory = await query_to_df(dsn, query)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
