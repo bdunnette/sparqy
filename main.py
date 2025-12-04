@@ -217,7 +217,7 @@ def redact_dsn_password(dsn: str) -> str:
     import re
 
     # handles case like PWD=password123;
-    return re.sub(r"(PWD=)[^;]*", r"\1****", dsn)
+    return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
 
 
 async def main(
