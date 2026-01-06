@@ -95,4 +95,7 @@ FROM INVENTORY_VLA INV
     LEFT JOIN ROOMS ON FREEZER.ROOM_ID = ROOMS.ROOM_ID
     LEFT JOIN BUILDINGS ON ROOMS.BUILDING_ID = BUILDINGS.BUILDING_ID
 WHERE
+    -- Yes, we're filtering by last name to get trial code... don't ask.
+    -- And yes, this is safe in this context - we control TRIAL_CODE input elsewhere.
+    -- Plus, aioodbc parameterization doesn't work in this scenario.
     CR.LAST_NAME = ?

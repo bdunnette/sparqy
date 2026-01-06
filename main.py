@@ -151,11 +151,14 @@ def parse_sql_file(sql_file, trial_code):
         return
 
 
-async def query_to_df(dsn, query):
+async def query_to_df(dsn, query, trial_code=None):
     async with aioodbc.create_pool(dsn=dsn) as pool:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(query)
+                if trial_code is not None:
+                    await cur.execute(query, (trial_code,))
+                else:
+                    await cur.execute(query)
                 rows = await cur.fetchall()
                 df = pd.DataFrame.from_records(
                     rows, columns=[desc[0] for desc in cur.description]
@@ -249,6 +252,8 @@ async def main(
             return
         logger.debug(f"SQL Query: {query}")
         dsn = f"Driver={db_driver};SERVER={db_host};DATABASE={db_name};"
+        if db_port:
+            dsn += f"PORT={db_port};"
         if db_user and db_password:
             dsn += f"UID={db_user};PWD={db_password};"
         else:
@@ -256,7 +261,7 @@ async def main(
         logger.info(
             f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
         )
-        trial_inventory = await query_to_df(dsn, query)
+        trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
