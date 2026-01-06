@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aioodbc>=0.5.0",
     "django-environ>=0.12.0",
-    "pandas[parquet,performance]>=2.3.1",
+    "pandas[compression,parquet,performance,sql-other]>=2.3.1",
     "pyodbc>=5.2.0",
     "python-dotenv>=1.1.1",
     "python-slugify>=8.0.4",
