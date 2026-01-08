@@ -198,6 +198,12 @@ def extract_sampleid(df):
     return df
 
 
+# Extract SampleID using alternative pattern - any digits after LAB_ID:
+def extract_sampleid2(df):
+    df["SAMPLEID2"] = df["COMMENTS"].str.extract(r"LAB_ID:(\d+)")
+    return df
+
+
 def parquet_path(trial_code, output_dir, include_dsn_in_filename, add_trial_to_path):
     # Add DSN to filename if specified
     if include_dsn_in_filename:
@@ -263,6 +269,7 @@ async def main(
         )
         trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
+        trial_inventory = extract_sampleid2(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
                 trial_inventory, exclude_conditions, exclude_matcodes
