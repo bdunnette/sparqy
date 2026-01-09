@@ -222,12 +222,6 @@ def parquet_path(trial_code, output_dir, include_dsn_in_filename, add_trial_to_p
     return final_parquet_file_path
 
 
-def redact_dsn_password(dsn: str) -> str:
-    # Replace PWD=...; with PWD=****;
-    # handles case like PWD=password123;
-    return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
-
-
 async def main(
     db_host,
     db_name,
