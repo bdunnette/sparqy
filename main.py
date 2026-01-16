@@ -151,15 +151,18 @@ def parse_sql_file(sql_file, trial_code):
         return
 
 
-async def query_to_df(dsn, query, trial_code=None):
+async def query_to_df(dsn, query, params=None):
     async with aioodbc.create_pool(dsn=dsn) as pool:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                if trial_code is not None:
-                    await cur.execute(query, (trial_code,))
+                if params is not None:
+                    logger.debug(f"Executing query with params: {params}")
+                    await cur.execute(query, (params,))
                 else:
+                    logger.debug("Executing query without params")
                     await cur.execute(query)
                 rows = await cur.fetchall()
+                logger.debug(f"Fetched {len(rows)} rows")
                 df = pd.DataFrame.from_records(
                     rows, columns=[desc[0] for desc in cur.description]
                 )
@@ -228,6 +231,20 @@ def redact_dsn_password(dsn: str) -> str:
     return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
 
 
+def generate_history_query(trial_inventory):
+    # Placeholder function to fetch inventory history
+    inventory_ids = trial_inventory["VIAL_CONTAINER_INV_ID"].tolist()
+    history_sql = f"""
+    SELECT *
+    FROM
+        INVENTORY_TRANSACTIONS_VLA IT
+        LEFT JOIN LOCATIONS ON IT.LOCATIONCODE = LOCATIONS.LOCATIONCODE
+    WHERE
+        IT.INVENTORYID IN ({", ".join("?" for _ in inventory_ids)})
+    """
+    return history_sql, inventory_ids
+
+
 async def main(
     db_host,
     db_name,
@@ -267,27 +284,43 @@ async def main(
         logger.info(
             f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
         )
-        trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
+        trial_inventory = await query_to_df(dsn, query, params=(str(trial_code),))
         trial_inventory = extract_sampleid(trial_inventory)
         trial_inventory = extract_sampleid2(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
                 trial_inventory, exclude_conditions, exclude_matcodes
             )
+        history_sql, inventory_ids = generate_history_query(trial_inventory)
+        trial_inventory_history = await query_to_df(
+            dsn, history_sql, params=inventory_ids
+        )
+        logger.info(
+            f"Retrieved {len(trial_inventory_history)} history records for {len(trial_inventory)} inventory items."
+        )
         final_parquet_file_path = parquet_path(
             trial_code=trial_code,
             output_dir=output_dir,
             include_dsn_in_filename=include_dsn_in_filename,
             add_trial_to_path=add_trial_to_path,
         )
+        history_parquet_file_path = final_parquet_file_path.with_name(
+            final_parquet_file_path.stem + "_history.parquet"
+        )
         trial_inventory.to_parquet(
             final_parquet_file_path, compression=parquet_compression
         )
-        logging.info(
+        logger.info(
             f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
         )
+        trial_inventory_history.to_parquet(
+            history_parquet_file_path, compression=parquet_compression
+        )
+        logger.info(
+            f"{len(trial_inventory_history)} {trial_code} history records saved to {history_parquet_file_path.absolute()} with {parquet_compression} compression."
+        )
     except Exception as e:
-        logger.error(f"Error processing trial inventory: {e}")
+        logger.error(f"An error occurred: {e}")
 
 
 if __name__ == "__main__":
