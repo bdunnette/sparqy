@@ -194,12 +194,6 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
 
 
 def extract_sampleid(df):
-    df["SAMPLEID"] = df["COMMENTS"].str.extract(r"SAMPLEID:(.*?),")
-    return df
-
-
-# Extract SampleID using alternative pattern - any digits after LAB_ID:
-def extract_sampleid2(df):
     """
     Extract an alternative sample identifier from the COMMENTS column based on LAB_ID.
 
@@ -221,6 +215,7 @@ def extract_sampleid2(df):
         The same DataFrame with an additional ``SAMPLEID2`` column containing
         the extracted numeric lab ID values (or NaN where no match is found).
     """
+    df["SAMPLEID"] = df["COMMENTS"].str.extract(r"SAMPLEID:(.*?),")
     df["SAMPLEID2"] = df["COMMENTS"].str.extract(r"LAB_ID:(\d+)")
     return df
 
@@ -290,7 +285,6 @@ async def main(
         )
         trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
-        trial_inventory = extract_sampleid2(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
                 trial_inventory, exclude_conditions, exclude_matcodes
