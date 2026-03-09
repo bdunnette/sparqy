@@ -150,7 +150,7 @@ def parse_sql_file(sql_file):
             return file.read()
     else:
         logger.error(f"SQL file not found: {sql_file}")
-        return
+        return None
 
 
 async def query_to_df(dsn, query, trial_code=None):
