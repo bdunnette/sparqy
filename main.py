@@ -11,6 +11,7 @@ import pandas as pd
 import environ
 from slugify import slugify
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = getLogger(__name__)
@@ -153,20 +154,18 @@ def parse_sql_file(sql_file):
         return None
 
 
-async def query_to_df(dsn, query, trial_code=None):
+async def query_to_df(connection_url, query, trial_code=None):
     """
     Asynchronously execute a database query and return the results as a DataFrame.
 
     Args:
-        dsn (str): ODBC connection string.
+        connection_url (URL): SQLAlchemy connection URL.
         query (str): SQL query text to execute.
         trial_code (Optional[str]): Trial code parameter for the query.
 
     Returns:
         pd.DataFrame: Query results as a pandas DataFrame.
     """
-    # For aioodbc, we use mssql+aioodbc
-    connection_url = f"mssql+aioodbc:///?odbc_connect={dsn}"
     engine = create_async_engine(connection_url)
     try:
         async with engine.connect() as conn:
@@ -344,18 +343,30 @@ async def main(
             logger.error("Failed to parse SQL file.")
             return
         logger.debug(f"SQL Query: {query}")
-        dsn = f"Driver={db_driver};SERVER={db_host};DATABASE={db_name};"
-        if db_port:
-            dsn += f"PORT={db_port};"
+        query_params = {"driver": db_driver}
+        username = None
+        password = None
         if db_user and db_password:
-            dsn += f"UID={db_user};PWD={db_password};"
+            username = db_user
+            password = db_password
         else:
-            dsn += "Trusted_Connection=yes;"
+            query_params["Trusted_Connection"] = "yes"
+        connection_url = URL.create(
+            "mssql+aioodbc",
+            username=username,
+            password=password,
+            host=db_host,
+            port=db_port,
+            database=db_name,
+            query=query_params,
+        )
         logger.info(
             f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
         )
-        logger.debug(f"DSN: {redact_dsn_password(dsn)}")
-        trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
+        logger.debug(
+            f"Connection URL: {connection_url.render_as_string(hide_password=True)}"
+        )
+        trial_inventory = await query_to_df(connection_url, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
