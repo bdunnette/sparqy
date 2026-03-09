@@ -4,7 +4,7 @@
 [![Dependabot Updates](https://github.com/UMN-ARDL-Biorepository/sparqy/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/UMN-ARDL-Biorepository/sparqy/actions/workflows/dependabot/dependabot-updates)
 [![Prek checks](https://github.com/UMN-ARDL-Biorepository/sparqy/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/UMN-ARDL-Biorepository/sparqy/actions/workflows/pre-commit.yml)
 
-Sparqy downloads specimen data from a StarLIMS database using [Pandas](https://pandas.pydata.org/docs), [SQLAlchemy](https://www.sqlalchemy.org/), and [PyODBC](https://learn.microsoft.com/en-us/sql/connect/python/pyodbc) (with [aioodbc](https://github.com/aio-libs/aioodbc) for async support). Data is stored in local [Parquet files](https://parquet.apache.org/) for further analysis.
+Sparqy downloads specimen data from a StarLIMS database using [Pandas](https://pandas.pydata.org/docs), [SQLAlchemy](https://www.sqlalchemy.org/), and [PyODBC](https://learn.microsoft.com/en-us/sql/connect/python/pyodbc). Data is stored in local [Parquet files](https://parquet.apache.org/) for further analysis.
 
 It supports **parameterized SQL queries** using SQLAlchemy's named parameter syntax (e.g., `:trial_code`).
 

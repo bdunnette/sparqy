@@ -4,15 +4,12 @@ import re
 from pathlib import Path
 from logging import basicConfig, INFO, DEBUG, getLogger
 import argparse
-import asyncio
-
 import pyodbc
 import pandas as pd
 import environ
 from slugify import slugify
-from sqlalchemy import text
+from sqlalchemy import text, create_engine
 from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,7 +42,10 @@ def parse_args():
         help="Database name",
     )
     parser.add_argument(
-        "--db_port", type=int, default=os.getenv("DB_PORT", 1443), help="Database port"
+        "--db_port",
+        type=int,
+        default=os.getenv("DB_PORT", None),
+        help="Database port (optional)",
     )
     parser.add_argument(
         "--db_user",
@@ -154,9 +154,9 @@ def parse_sql_file(sql_file):
         return None
 
 
-async def query_to_df(connection_url, query, trial_code=None):
+def query_to_df(connection_url, query, trial_code=None):
     """
-    Asynchronously execute a database query and return the results as a DataFrame.
+    Execute a database query and return the results as a DataFrame.
 
     Args:
         connection_url (URL): SQLAlchemy connection URL.
@@ -166,17 +166,27 @@ async def query_to_df(connection_url, query, trial_code=None):
     Returns:
         pd.DataFrame: Query results as a pandas DataFrame.
     """
-    engine = create_async_engine(connection_url)
+    logger.debug(f"Creating engine with URL: {connection_url}")
+    engine = create_engine(connection_url)
+    logger.debug(f"Engine created: {engine}")
     try:
-        async with engine.connect() as conn:
+        with engine.connect() as conn:
             # SQLAlchemy text() handles named parameters like :trial_code
+            logger.debug(f"Executing query: {query}")
             params = {"trial_code": trial_code} if trial_code else {}
-            result = await conn.execute(text(query), params)
+            logger.debug(f"Query parameters: {params}")
+            result = conn.execute(text(query), params)
+            logger.debug(f"Query result object: {result}")
             # Fetch all rows and create a DataFrame
             rows = result.fetchall()
+            logger.debug(f"Fetched {len(rows)} rows")
             df = pd.DataFrame(rows, columns=result.keys())
+            logger.debug(f"DataFrame created with shape: {df.shape}")
+    except Exception as e:
+        logger.error(f"Error executing query: {e}")
+        raise
     finally:
-        await engine.dispose()
+        engine.dispose()
     return df
 
 
@@ -290,7 +300,7 @@ def redact_dsn_password(dsn: str) -> str:
     return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
 
 
-async def main(
+def main(
     db_host,
     db_name,
     db_port,
@@ -343,7 +353,13 @@ async def main(
             logger.error("Failed to parse SQL file.")
             return
         logger.debug(f"SQL Query: {query}")
-        query_params = {"driver": db_driver}
+        # Common MSSQL parameters to prevent timeouts or SSL issues
+        query_params = {
+            "driver": db_driver,
+            "TrustServerCertificate": "yes",
+            "Encrypt": "no",
+            "timeout": "30",  # seconds
+        }
         username = None
         password = None
         if db_user and db_password:
@@ -352,7 +368,7 @@ async def main(
         else:
             query_params["Trusted_Connection"] = "yes"
         connection_url = URL.create(
-            "mssql+aioodbc",
+            "mssql+pyodbc",
             username=username,
             password=password,
             host=db_host,
@@ -361,12 +377,32 @@ async def main(
             query=query_params,
         )
         logger.info(
-            f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
+            f"Connecting to database '{db_name}' on host '{db_host}'"
+            + (f" at port {db_port}" if db_port else " using dynamic/default port")
+            + f" using driver '{db_driver}'"
         )
+        # Pre-check: try a simple socket connection to verify network reachability
+        import socket
+
+        check_port = db_port or 1433  # Default to 1433 for reachability check if None
+        try:
+            with socket.create_connection((db_host, check_port), timeout=5):
+                logger.info(f"Port {check_port} on {db_host} is reachable.")
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            if db_port:
+                logger.error(
+                    f"Cannot reach {db_host}:{db_port}. Check your VPN or network connection. Error: {e}"
+                )
+                return
+            else:
+                logger.warning(
+                    f"Could not reach {db_host} on default port 1433. Dynamic port resolution might still work via the ODBC driver. Proceeding... (Error: {e})"
+                )
+
         logger.debug(
             f"Connection URL: {connection_url.render_as_string(hide_password=True)}"
         )
-        trial_inventory = await query_to_df(connection_url, query, trial_code=trial_code)
+        trial_inventory = query_to_df(connection_url, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
@@ -390,23 +426,21 @@ async def main(
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(
-        main(
-            db_host=args.db_host,
-            db_name=args.db_name,
-            db_port=args.db_port,
-            db_user=args.db_user,
-            db_password=args.db_password,
-            sql_file=args.sql_file,
-            trial_code=args.trial_code,
-            output_dir=args.output_dir,
-            add_trial_to_path=args.add_trial_to_path,
-            include_dsn_in_filename=args.include_dsn_in_filename,
-            no_viable=args.no_viable,
-            exclude_conditions=args.exclude_conditions,
-            exclude_matcodes=args.exclude_matcodes,
-            parquet_compression=args.parquet_compression,
-            db_driver=args.db_driver,
-            debug=args.debug,
-        )
+    main(
+        db_host=args.db_host,
+        db_name=args.db_name,
+        db_port=args.db_port,
+        db_user=args.db_user,
+        db_password=args.db_password,
+        sql_file=args.sql_file,
+        trial_code=args.trial_code,
+        output_dir=args.output_dir,
+        add_trial_to_path=args.add_trial_to_path,
+        include_dsn_in_filename=args.include_dsn_in_filename,
+        no_viable=args.no_viable,
+        exclude_conditions=args.exclude_conditions,
+        exclude_matcodes=args.exclude_matcodes,
+        parquet_compression=args.parquet_compression,
+        db_driver=args.db_driver,
+        debug=args.debug,
     )
