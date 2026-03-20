@@ -420,6 +420,35 @@ def main(
         logging.info(
             f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
         )
+
+        # Download inventory history
+        history_sql_file = Path(sql_file).parent / "inventory_history.sql"
+        if history_sql_file.exists():
+            logger.info(f"Downloading history for {trial_code}...")
+            history_query = parse_sql_file(history_sql_file)
+            if history_query:
+                history_df = query_to_df(
+                    connection_url, history_query, trial_code=trial_code
+                )
+                # Create history filename with '_history' suffix
+                history_parquet_file_name = (
+                    final_parquet_file_path.stem + "_history.parquet"
+                )
+                history_parquet_file_path = (
+                    final_parquet_file_path.parent / history_parquet_file_name
+                )
+
+                history_df.to_parquet(
+                    history_parquet_file_path, compression=parquet_compression
+                )
+                logging.info(
+                    f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()}."
+                )
+            else:
+                logger.warning("History query was empty.")
+        else:
+            logger.warning(f"History SQL file not found: {history_sql_file}")
+
     except Exception as e:
         logger.error(f"Error processing trial inventory: {e}")
 
