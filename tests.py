@@ -127,7 +127,15 @@ def test_trial_inventory_query():
     db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
     trial_code = os.getenv("TRIAL_CODE", "*TEST-SCOTT*")
-    db_driver = os.getenv("DB_DRIVER", pyodbc.drivers()[0])
+    db_driver = os.getenv("DB_DRIVER")
+    if not db_driver:
+        available_drivers = pyodbc.drivers()
+        if not available_drivers:
+            pytest.skip(
+                "Skipping DB tests because no ODBC drivers are installed "
+                "and DB_DRIVER is not set."
+            )
+        db_driver = available_drivers[0]
 
     db_port = None
     if db_port_str is not None:
