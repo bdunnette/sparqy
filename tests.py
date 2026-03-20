@@ -1,10 +1,26 @@
+import os
 import pandas as pd
+import pytest
+from pathlib import Path
+import environ
 from main import (
     extract_sampleid,
     flag_viable,
     redact_dsn_password,
     parquet_path,
     parse_sql_file,
+    URL,
+    query_to_df,
+)
+
+BASE_DIR = Path(__file__).resolve().parent
+env = environ.Env()
+if (BASE_DIR / ".env").exists():
+    environ.Env.read_env(env_file=BASE_DIR / ".env")
+
+# Local-only database tests
+RUN_DB_TESTS = (
+    os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("DB_HOST") is not None
 )
 
 
@@ -93,3 +109,97 @@ def test_parse_sql_file(tmp_path):
 
     # Test non-existent file
     assert parse_sql_file(tmp_path / "missing.sql") is None
+
+
+@pytest.mark.skipif(
+    not RUN_DB_TESTS,
+    reason="Skipping DB tests in GitHub Actions or if DB_HOST is missing.",
+)
+def test_trial_inventory_query():
+    """Verify that the trial_inventory.sql query can be executed."""
+    import pyodbc
+
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME")
+    db_port = os.getenv("DB_PORT")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    trial_code = os.getenv("TRIAL_CODE", "*TEST-SCOTT*")
+    db_driver = os.getenv("DB_DRIVER", pyodbc.drivers()[0])
+
+    query_params = {
+        "driver": db_driver,
+        "TrustServerCertificate": "yes",
+        "Encrypt": "no",
+    }
+    username = None
+    password = None
+    if db_user and db_password:
+        username = db_user
+        password = db_password
+    else:
+        query_params["Trusted_Connection"] = "yes"
+
+    connection_url = URL.create(
+        "mssql+pyodbc",
+        username=username,
+        password=password,
+        host=db_host,
+        port=db_port,
+        database=db_name,
+        query=query_params,
+    )
+
+    # Test main query
+    sql_file = BASE_DIR / "trial_inventory.sql"
+    query = parse_sql_file(sql_file)
+    assert query is not None
+    df = query_to_df(connection_url, query, trial_code=trial_code)
+    assert isinstance(df, pd.DataFrame)
+
+
+@pytest.mark.skipif(
+    not RUN_DB_TESTS,
+    reason="Skipping DB tests in GitHub Actions or if DB_HOST is missing.",
+)
+def test_inventory_history_query():
+    """Verify that the inventory_history.sql query can be executed."""
+    import pyodbc
+
+    db_host = os.getenv("DB_HOST")
+    db_name = os.getenv("DB_NAME")
+    db_port = os.getenv("DB_PORT")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    trial_code = os.getenv("TRIAL_CODE", "*TEST-SCOTT*")
+    db_driver = os.getenv("DB_DRIVER", pyodbc.drivers()[0])
+
+    query_params = {
+        "driver": db_driver,
+        "TrustServerCertificate": "yes",
+        "Encrypt": "no",
+    }
+    username = None
+    password = None
+    if db_user and db_password:
+        username = db_user
+        password = db_password
+    else:
+        query_params["Trusted_Connection"] = "yes"
+
+    connection_url = URL.create(
+        "mssql+pyodbc",
+        username=username,
+        password=password,
+        host=db_host,
+        port=db_port,
+        database=db_name,
+        query=query_params,
+    )
+
+    # Test history query
+    sql_file = BASE_DIR / "inventory_history.sql"
+    query = parse_sql_file(sql_file)
+    assert query is not None
+    df = query_to_df(connection_url, query, trial_code=trial_code)
+    assert isinstance(df, pd.DataFrame)
