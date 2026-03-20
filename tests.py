@@ -20,7 +20,9 @@ if (BASE_DIR / ".env").exists():
 
 # Local-only database tests
 RUN_DB_TESTS = (
-    os.getenv("GITHUB_ACTIONS") != "true" and os.getenv("DB_HOST") is not None
+    os.getenv("GITHUB_ACTIONS") != "true"
+    and bool(os.getenv("DB_HOST"))
+    and bool(os.getenv("DB_NAME"))
 )
 
 
