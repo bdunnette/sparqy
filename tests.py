@@ -123,12 +123,17 @@ def test_trial_inventory_query():
 
     db_host = os.getenv("DB_HOST")
     db_name = os.getenv("DB_NAME")
-    db_port = os.getenv("DB_PORT")
+    db_port_str = os.getenv("DB_PORT")
     db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
     trial_code = os.getenv("TRIAL_CODE", "*TEST-SCOTT*")
     db_driver = os.getenv("DB_DRIVER", pyodbc.drivers()[0])
 
+    db_port = None
+    if db_port_str is not None:
+        db_port_str = db_port_str.strip()
+        if db_port_str:
+            db_port = int(db_port_str)
     query_params = {
         "driver": db_driver,
         "TrustServerCertificate": "yes",
