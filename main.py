@@ -131,6 +131,12 @@ def parse_args():
         default=env.bool("DEBUG", default=False),  # type: ignore
         help="Enable debug mode",
     )
+    parser.add_argument(
+        "--download_history",
+        action="store_true",
+        default=env.bool("DOWNLOAD_HISTORY", default=False),  # type: ignore
+        help="Enable downloading of inventory history",
+    )
 
     return parser.parse_args()
 
@@ -317,6 +323,7 @@ def main(
     parquet_compression,
     db_driver,
     debug=False,
+    download_history=False,
 ):
     """
     Main orchestration function for the Sparqy data extraction process.
@@ -422,32 +429,33 @@ def main(
         )
 
         # Download inventory history
-        history_sql_file = Path(sql_file).parent / "inventory_history.sql"
-        if history_sql_file.exists():
-            logger.info(f"Downloading history for {trial_code}...")
-            history_query = parse_sql_file(history_sql_file)
-            if history_query:
-                history_df = query_to_df(
-                    connection_url, history_query, trial_code=trial_code
-                )
-                # Create history filename with '_history' suffix
-                history_parquet_file_name = (
-                    final_parquet_file_path.stem + "_history.parquet"
-                )
-                history_parquet_file_path = (
-                    final_parquet_file_path.parent / history_parquet_file_name
-                )
+        if download_history:
+            history_sql_file = Path(sql_file).parent / "inventory_history.sql"
+            if history_sql_file.exists():
+                logger.info(f"Downloading history for {trial_code}...")
+                history_query = parse_sql_file(history_sql_file)
+                if history_query:
+                    history_df = query_to_df(
+                        connection_url, history_query, trial_code=trial_code
+                    )
+                    # Create history filename with '_history' suffix
+                    history_parquet_file_name = (
+                        final_parquet_file_path.stem + "_history.parquet"
+                    )
+                    history_parquet_file_path = (
+                        final_parquet_file_path.parent / history_parquet_file_name
+                    )
 
-                history_df.to_parquet(
-                    history_parquet_file_path, compression=parquet_compression
-                )
-                logging.info(
-                    f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()}."
-                )
+                    history_df.to_parquet(
+                        history_parquet_file_path, compression=parquet_compression
+                    )
+                    logging.info(
+                        f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()}."
+                    )
+                else:
+                    logger.warning("History query was empty.")
             else:
-                logger.warning("History query was empty.")
-        else:
-            logger.warning(f"History SQL file not found: {history_sql_file}")
+                logger.warning(f"History SQL file not found: {history_sql_file}")
 
     except Exception as e:
         logger.error(f"Error processing trial inventory: {e}")
@@ -472,4 +480,5 @@ if __name__ == "__main__":
         parquet_compression=args.parquet_compression,
         db_driver=args.db_driver,
         debug=args.debug,
+        download_history=args.download_history,
     )
