@@ -360,11 +360,25 @@ def main(
             logger.error("Failed to parse SQL file.")
             return
         logger.debug(f"SQL Query: {query}")
-        # Common MSSQL parameters to prevent timeouts or SSL issues
+        # Common MSSQL parameters. Default to secure TLS settings and allow
+        # explicit environment-based overrides for legacy deployments.
+        encrypt = os.getenv("DB_ENCRYPT", "yes").strip().lower()
+        trust_server_certificate = os.getenv("DB_TRUST_SERVER_CERTIFICATE", "no").strip().lower()
+        if encrypt not in {"yes", "no"}:
+            raise ValueError("DB_ENCRYPT must be either 'yes' or 'no'.")
+        if trust_server_certificate not in {"yes", "no"}:
+            raise ValueError("DB_TRUST_SERVER_CERTIFICATE must be either 'yes' or 'no'.")
+        if encrypt == "no" or trust_server_certificate == "yes":
+            logger.warning(
+                "Using insecure SQL Server TLS settings: Encrypt=%s, TrustServerCertificate=%s. "
+                "This should only be used for legacy environments.",
+                encrypt,
+                trust_server_certificate,
+            )
         query_params = {
             "driver": db_driver,
-            "TrustServerCertificate": "yes",
-            "Encrypt": "no",
+            "TrustServerCertificate": trust_server_certificate,
+            "Encrypt": encrypt,
             "timeout": "30",  # seconds
         }
         username = None
