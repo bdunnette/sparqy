@@ -1,5 +1,5 @@
 import os
-import pandas as pd
+import polars as pl
 import pytest
 from pathlib import Path
 import environ
@@ -27,7 +27,7 @@ RUN_DB_TESTS = (
 
 
 def test_extract_sampleid():
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "COMMENTS": [
                 "SAMPLEID:ABC-123, other text",
@@ -42,12 +42,12 @@ def test_extract_sampleid():
     assert result["SAMPLEID2"][1] == "999"
     assert result["SAMPLEID"][2] == "XYZ-789"
     assert result["SAMPLEID2"][2] == "888"
-    assert pd.isna(result["SAMPLEID"][3])
-    assert pd.isna(result["SAMPLEID2"][3])
+    assert result["SAMPLEID"][3] is None
+    assert result["SAMPLEID2"][3] is None
 
 
 def test_flag_viable():
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "MATCODE": ["Box", None, "100x100Box", "Box", "Box", "Box"],
             "RECEIVED_CONDITION": ["Good", "Good", "Good", "SNR", "Good", "Good"],
@@ -170,7 +170,7 @@ def test_trial_inventory_query():
     query = parse_sql_file(sql_file)
     assert query is not None
     df = query_to_df(connection_url, query, trial_code=trial_code)
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df, pl.DataFrame)
 
 
 @pytest.mark.skipif(
@@ -225,4 +225,4 @@ def test_inventory_history_query():
     query = parse_sql_file(sql_file)
     assert query is not None
     df = query_to_df(connection_url, query, trial_code=trial_code)
-    assert isinstance(df, pd.DataFrame)
+    assert isinstance(df, pl.DataFrame)

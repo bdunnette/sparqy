@@ -5,7 +5,7 @@ from pathlib import Path
 from logging import basicConfig, INFO, DEBUG, getLogger
 import argparse
 import pyodbc
-import pandas as pd
+import polars as pl
 import environ
 from slugify import slugify
 from sqlalchemy import text, create_engine
@@ -170,24 +170,24 @@ def query_to_df(connection_url, query, trial_code=None):
         trial_code (Optional[str]): Trial code parameter for the query.
 
     Returns:
-        pd.DataFrame: Query results as a pandas DataFrame.
+        pl.DataFrame: Query results as a Polars DataFrame.
     """
     logger.debug(f"Creating engine with URL: {connection_url}")
     engine = create_engine(connection_url)
     logger.debug(f"Engine created: {engine}")
     try:
-        with engine.connect() as conn:
-            # SQLAlchemy text() handles named parameters like :trial_code
-            logger.debug(f"Executing query: {query}")
-            params = {"trial_code": trial_code} if trial_code else {}
-            logger.debug(f"Query parameters: {params}")
-            result = conn.execute(text(query), params)
-            logger.debug(f"Query result object: {result}")
-            # Fetch all rows and create a DataFrame
-            rows = result.fetchall()
-            logger.debug(f"Fetched {len(rows)} rows")
-            df = pd.DataFrame(rows, columns=result.keys())
-            logger.debug(f"DataFrame created with shape: {df.shape}")
+        # SQLAlchemy text() handles named parameters like :trial_code
+        logger.debug(f"Executing query: {query}")
+        params = {"trial_code": trial_code} if trial_code else {}
+        logger.debug(f"Query parameters: {params}")
+
+        # Polars can read from SQLAlchemy engines
+        df = pl.read_database(
+            query=text(query),
+            connection=engine.connect(),
+            execute_options={"parameters": params},
+        )
+        logger.debug(f"DataFrame created with shape: {df.shape}")
     except Exception as e:
         logger.error(f"Error executing query: {e}")
         raise
@@ -201,32 +201,33 @@ def flag_viable(df, exclude_conditions, exclude_matcodes):
     Apply viability rules to filter or mark specimens in the DataFrame.
 
     Args:
-        df (pd.DataFrame): Input specimen data.
+        df (pl.DataFrame): Input specimen data.
         exclude_conditions (list[str]): List of RECEIVED_CONDITION or SAMPLE_CONDITION values to exclude.
         exclude_matcodes (list[str]): List of MATCODE values to exclude.
 
     Returns:
-        pd.DataFrame: DataFrame with an added 'VIABLE' boolean column.
+        pl.DataFrame: DataFrame with an added 'VIABLE' boolean column.
     """
     logging.info(
         f"Flagging non-viable specimens based on conditions: {exclude_conditions} and matcodes: {exclude_matcodes}"
     )
-    # Assume all specimens are viable initially
-    df["VIABLE"] = True
+
     # Define conditions for non-viable specimens
-    df["VIABLE"] = (
-        ~df["MATCODE"].isin(exclude_matcodes)
-        # NA MATCODE indicates specimen is not allocated to storage box
-        & ~df["MATCODE"].isna()
-        & ~df["RECEIVED_CONDITION"].isin(exclude_conditions)
-        & ~df["SAMPLE_CONDITION"].isin(exclude_conditions)
-        & ~df["AMOUNTLEFT"].isnull()
-        & ~df["AMOUNTLEFT"].le(0)
+    df = df.with_columns(
+        VIABLE=(
+            ~pl.col("MATCODE").is_in(exclude_matcodes)
+            & pl.col("MATCODE").is_not_null()
+            & ~pl.col("RECEIVED_CONDITION").is_in(exclude_conditions)
+            & ~pl.col("SAMPLE_CONDITION").is_in(exclude_conditions)
+            & pl.col("AMOUNTLEFT").is_not_null()
+            & (pl.col("AMOUNTLEFT") > 0)
+        )
     )
-    not_viable = df[~df["VIABLE"]]
-    not_viable_count = not_viable.shape[0]
+
+    not_viable_count = df.filter(~pl.col("VIABLE")).height
+    total_count = df.height
     percent_not_viable = (
-        round((not_viable_count / df.shape[0]) * 100, 2) if df.shape[0] > 0 else 0
+        round((not_viable_count / total_count) * 100, 2) if total_count > 0 else 0
     )
     logging.info(
         f"Flagged {not_viable_count} non-viable specimens ({percent_not_viable}%)."
@@ -246,19 +247,19 @@ def extract_sampleid(df):
 
     Parameters
     ----------
-    df : pandas.DataFrame
+    df : polars.DataFrame
         A DataFrame that must contain a ``COMMENTS`` column from which the
         ``LAB_ID``-based identifier will be extracted.
 
     Returns
     -------
-    pandas.DataFrame
-        The same DataFrame with an additional ``SAMPLEID2`` column containing
-        the extracted numeric lab ID values (or NaN where no match is found).
+    polars.DataFrame
+        The same DataFrame with additional ``SAMPLEID`` and ``SAMPLEID2`` columns.
     """
-    df["SAMPLEID"] = df["COMMENTS"].str.extract(r"SAMPLEID:(.*?),")
-    df["SAMPLEID2"] = df["COMMENTS"].str.extract(r"LAB_ID:(\d+)")
-    return df
+    return df.with_columns(
+        SAMPLEID=pl.col("COMMENTS").str.extract(r"SAMPLEID:(.*?),", 1),
+        SAMPLEID2=pl.col("COMMENTS").str.extract(r"LAB_ID:(\d+)", 1),
+    )
 
 
 def parquet_path(trial_code, output_dir, include_dsn_in_filename, add_trial_to_path):
@@ -439,7 +440,7 @@ def main(
             include_dsn_in_filename=include_dsn_in_filename,
             add_trial_to_path=add_trial_to_path,
         )
-        trial_inventory.to_parquet(
+        trial_inventory.write_parquet(
             final_parquet_file_path, compression=parquet_compression
         )
         logging.info(
@@ -464,7 +465,7 @@ def main(
                         final_parquet_file_path.parent / history_parquet_file_name
                     )
 
-                    history_df.to_parquet(
+                    history_df.write_parquet(
                         history_parquet_file_path, compression=parquet_compression
                     )
                     logging.info(
