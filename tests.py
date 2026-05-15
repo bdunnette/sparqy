@@ -1,13 +1,19 @@
 import os
+import sys
 import polars as pl
 import pytest
 from pathlib import Path
 import environ
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from main import (
     extract_sampleid,
     flag_viable,
     redact_dsn_password,
     parquet_path,
+    resolve_parquet_compression,
+    select_smallest_parquet_compression,
     parse_sql_file,
     URL,
     query_to_df,
@@ -99,6 +105,34 @@ def test_parquet_path(tmp_path):
     # Case 3: Add trial to path
     path = parquet_path(trial_code, output_dir, False, True)
     assert path.parent == output_dir / trial_code
+
+
+def test_select_smallest_parquet_compression_prefers_smaller_file():
+    class FakeFrame:
+        def __init__(self, sizes):
+            self.sizes = sizes
+
+        def write_parquet(self, path, compression):
+            Path(path).write_bytes(b"x" * self.sizes[compression])
+
+    frame = FakeFrame({"zstd": 120, "gzip": 80})
+
+    assert select_smallest_parquet_compression(frame) == "gzip"
+
+
+def test_resolve_parquet_compression_auto_uses_smallest_codec():
+    class FakeFrame:
+        def __init__(self, sizes):
+            self.sizes = sizes
+
+        def write_parquet(self, path, compression):
+            Path(path).write_bytes(b"x" * self.sizes[compression])
+
+    frame = FakeFrame({"zstd": 64, "gzip": 96})
+
+    assert resolve_parquet_compression(frame, None) == "zstd"
+    assert resolve_parquet_compression(frame, "auto") == "zstd"
+    assert resolve_parquet_compression(frame, "gzip") == "gzip"
 
 
 def test_parse_sql_file(tmp_path):

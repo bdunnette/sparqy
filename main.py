@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 from logging import basicConfig, INFO, DEBUG, getLogger
 import argparse
@@ -18,6 +19,7 @@ env = environ.Env(
     DEBUG=(bool, False)
 )
 environ.Env.read_env(env_file=BASE_DIR / ".env")
+PARQUET_COMPRESSION_CANDIDATES = ("zstd", "gzip")
 
 
 def parse_args():
@@ -116,8 +118,8 @@ def parse_args():
     parser.add_argument(
         "--parquet_compression",
         type=str,
-        default=env("PARQUET_COMPRESSION", default="zstd"),  # type: ignore
-        help="Parquet compression type",
+        default=env("PARQUET_COMPRESSION", default=None),  # type: ignore
+        help="Parquet compression type, or auto to pick the smallest gzip/zstd output",
     )
     parser.add_argument(
         "--db_driver",
@@ -292,6 +294,59 @@ def parquet_path(trial_code, output_dir, include_dsn_in_filename, add_trial_to_p
     return final_parquet_file_path
 
 
+def select_smallest_parquet_compression(df, candidates=PARQUET_COMPRESSION_CANDIDATES):
+    """
+    Compare parquet output sizes for the given DataFrame and return the smallest codec.
+
+    Args:
+        df (pl.DataFrame): Data to probe.
+        candidates (tuple[str, ...]): Compression codecs to compare.
+
+    Returns:
+        str: The codec that yields the smallest parquet file.
+    """
+    if not candidates:
+        raise ValueError("At least one parquet compression candidate is required.")
+
+    best_compression = candidates[0]
+    best_size = None
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        for compression in candidates:
+            probe_path = temp_dir_path / f"probe_{compression}.parquet"
+            df.write_parquet(probe_path, compression=compression)
+            size = probe_path.stat().st_size
+            logger.debug(
+                "Probe parquet size with %s compression: %s bytes", compression, size
+            )
+            if best_size is None or size < best_size:
+                best_compression = compression
+                best_size = size
+
+    logger.info(
+        "Selected parquet compression '%s' for smallest output size (%s bytes).",
+        best_compression,
+        best_size,
+    )
+    return best_compression
+
+
+def resolve_parquet_compression(df, parquet_compression):
+    """
+    Resolve the parquet compression codec, auto-selecting the smallest gzip/zstd output.
+
+    Args:
+        df (pl.DataFrame): Data to write.
+        parquet_compression (Optional[str]): Requested codec or auto selector.
+
+    Returns:
+        str: Compression codec to use when writing parquet.
+    """
+    if not parquet_compression or str(parquet_compression).strip().lower() == "auto":
+        return select_smallest_parquet_compression(df)
+    return parquet_compression
+
+
 def redact_dsn_password(dsn: str) -> str:
     """
     Redact the PWD parameter in a DSN string for safe logging.
@@ -440,11 +495,14 @@ def main(
             include_dsn_in_filename=include_dsn_in_filename,
             add_trial_to_path=add_trial_to_path,
         )
+        resolved_parquet_compression = resolve_parquet_compression(
+            trial_inventory, parquet_compression
+        )
         trial_inventory.write_parquet(
-            final_parquet_file_path, compression=parquet_compression
+            final_parquet_file_path, compression=resolved_parquet_compression
         )
         logging.info(
-            f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
+            f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {resolved_parquet_compression} compression."
         )
 
         # Download inventory history
@@ -465,11 +523,15 @@ def main(
                         final_parquet_file_path.parent / history_parquet_file_name
                     )
 
+                    resolved_history_compression = resolve_parquet_compression(
+                        history_df, parquet_compression
+                    )
                     history_df.write_parquet(
-                        history_parquet_file_path, compression=parquet_compression
+                        history_parquet_file_path,
+                        compression=resolved_history_compression,
                     )
                     logging.info(
-                        f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()}."
+                        f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()} with {resolved_history_compression} compression."
                     )
                 else:
                     logger.warning("History query was empty.")

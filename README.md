@@ -31,6 +31,8 @@ You can edit the command-line arguments as needed to customize the behavior of s
 
 Variables can also be set in the `.env` file located in the root directory of the sparqy project. This allows you to define default values for the command-line arguments and avoid having to specify them every time you run the script.
 
+By default, parquet compression is set to `auto`, which compares gzip and zstd on the output data and uses whichever produces the smaller file.
+
 ```
 # .env example
 
@@ -42,6 +44,6 @@ TRIAL_CODE=10KFS
 OUTPUT_DIR=G:\\Shared drives\\ARDL Biorepository\\Studies
 EXCLUDE_CONDITIONS=["SNR","QNSR","QNS","NSI"]
 EXCLUDE_MATCODES=["100x100Box", None]
-PARQUET_COMPRESSION="zstd"
+PARQUET_COMPRESSION="auto"
 DB_DRIVER="SQL Server"
 ```
