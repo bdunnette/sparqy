@@ -10,12 +10,12 @@ dependencies = [
     "pyodbc>=5.2.0",
     "python-dotenv>=1.1.1",
     "python-slugify>=8.0.4",
-    "sqlalchemy>=2.0.43",
+    "sqlalchemy>=2.0.50",
 ]
 
 [dependency-groups]
 dev = [
-    "prek>=0.4.0",
+    "prek>=0.4.3",
     "pytest>=8.4.1",
 ]
 
