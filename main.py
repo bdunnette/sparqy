@@ -4,14 +4,12 @@ import re
 from pathlib import Path
 from logging import basicConfig, INFO, DEBUG, getLogger
 import argparse
-import asyncio
-
 import pyodbc
 import pandas as pd
 import environ
 from slugify import slugify
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text, create_engine
+from sqlalchemy.engine import URL
 
 logger = getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,7 +42,10 @@ def parse_args():
         help="Database name",
     )
     parser.add_argument(
-        "--db_port", type=int, default=os.getenv("DB_PORT", 1443), help="Database port"
+        "--db_port",
+        type=int,
+        default=os.getenv("DB_PORT", None),
+        help="Database port (optional)",
     )
     parser.add_argument(
         "--db_user",
@@ -130,6 +131,12 @@ def parse_args():
         default=env.bool("DEBUG", default=False),  # type: ignore
         help="Enable debug mode",
     )
+    parser.add_argument(
+        "--download_history",
+        action="store_true",
+        default=env.bool("DOWNLOAD_HISTORY", default=False),  # type: ignore
+        help="Enable downloading of inventory history",
+    )
 
     return parser.parse_args()
 
@@ -153,31 +160,39 @@ def parse_sql_file(sql_file):
         return None
 
 
-async def query_to_df(dsn, query, trial_code=None):
+def query_to_df(connection_url, query, trial_code=None):
     """
-    Asynchronously execute a database query and return the results as a DataFrame.
+    Execute a database query and return the results as a DataFrame.
 
     Args:
-        dsn (str): ODBC connection string.
+        connection_url (URL): SQLAlchemy connection URL.
         query (str): SQL query text to execute.
         trial_code (Optional[str]): Trial code parameter for the query.
 
     Returns:
         pd.DataFrame: Query results as a pandas DataFrame.
     """
-    # For aioodbc, we use mssql+aioodbc
-    connection_url = f"mssql+aioodbc:///?odbc_connect={dsn}"
-    engine = create_async_engine(connection_url)
+    logger.debug(f"Creating engine with URL: {connection_url}")
+    engine = create_engine(connection_url)
+    logger.debug(f"Engine created: {engine}")
     try:
-        async with engine.connect() as conn:
+        with engine.connect() as conn:
             # SQLAlchemy text() handles named parameters like :trial_code
+            logger.debug(f"Executing query: {query}")
             params = {"trial_code": trial_code} if trial_code else {}
-            result = await conn.execute(text(query), params)
+            logger.debug(f"Query parameters: {params}")
+            result = conn.execute(text(query), params)
+            logger.debug(f"Query result object: {result}")
             # Fetch all rows and create a DataFrame
             rows = result.fetchall()
+            logger.debug(f"Fetched {len(rows)} rows")
             df = pd.DataFrame(rows, columns=result.keys())
+            logger.debug(f"DataFrame created with shape: {df.shape}")
+    except Exception as e:
+        logger.error(f"Error executing query: {e}")
+        raise
     finally:
-        await engine.dispose()
+        engine.dispose()
     return df
 
 
@@ -291,7 +306,7 @@ def redact_dsn_password(dsn: str) -> str:
     return re.sub(r"(PWD=)[^;]*", r"\1****", dsn, flags=re.IGNORECASE)
 
 
-async def main(
+def main(
     db_host,
     db_name,
     db_port,
@@ -308,6 +323,7 @@ async def main(
     parquet_compression,
     db_driver,
     debug=False,
+    download_history=False,
 ):
     """
     Main orchestration function for the Sparqy data extraction process.
@@ -344,18 +360,74 @@ async def main(
             logger.error("Failed to parse SQL file.")
             return
         logger.debug(f"SQL Query: {query}")
-        dsn = f"Driver={db_driver};SERVER={db_host};DATABASE={db_name};"
-        if db_port:
-            dsn += f"PORT={db_port};"
-        if db_user and db_password:
-            dsn += f"UID={db_user};PWD={db_password};"
-        else:
-            dsn += "Trusted_Connection=yes;"
-        logger.info(
-            f"Connecting to database '{db_name}' on host '{db_host}' using driver '{db_driver}'"
+        # Common MSSQL parameters. Default to secure TLS settings and allow
+        # explicit environment-based overrides for legacy deployments.
+        encrypt = os.getenv("DB_ENCRYPT", "yes").strip().lower()
+        trust_server_certificate = (
+            os.getenv("DB_TRUST_SERVER_CERTIFICATE", "yes").strip().lower()
         )
-        logger.debug(f"DSN: {redact_dsn_password(dsn)}")
-        trial_inventory = await query_to_df(dsn, query, trial_code=trial_code)
+        if encrypt not in {"yes", "no"}:
+            raise ValueError("DB_ENCRYPT must be either 'yes' or 'no'.")
+        if trust_server_certificate not in {"yes", "no"}:
+            raise ValueError(
+                "DB_TRUST_SERVER_CERTIFICATE must be either 'yes' or 'no'."
+            )
+        if encrypt == "no" or trust_server_certificate == "yes":
+            logger.warning(
+                "Using insecure SQL Server TLS settings: Encrypt=%s, TrustServerCertificate=%s. "
+                "This should only be used for legacy environments.",
+                encrypt,
+                trust_server_certificate,
+            )
+        query_params = {
+            "driver": db_driver,
+            "TrustServerCertificate": trust_server_certificate,
+            "Encrypt": encrypt,
+            "timeout": "30",  # seconds
+        }
+        username = None
+        password = None
+        if db_user and db_password:
+            username = db_user
+            password = db_password
+        else:
+            query_params["Trusted_Connection"] = "yes"
+        connection_url = URL.create(
+            "mssql+pyodbc",
+            username=username,
+            password=password,
+            host=db_host,
+            port=db_port,
+            database=db_name,
+            query=query_params,
+        )
+        logger.info(
+            f"Connecting to database '{db_name}' on host '{db_host}'"
+            + (f" at port {db_port}" if db_port else " using dynamic/default port")
+            + f" using driver '{db_driver}'"
+        )
+        # Pre-check: try a simple socket connection to verify network reachability
+        import socket
+
+        check_port = db_port or 1433  # Default to 1433 for reachability check if None
+        try:
+            with socket.create_connection((db_host, check_port), timeout=5):
+                logger.info(f"Port {check_port} on {db_host} is reachable.")
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            if db_port:
+                logger.error(
+                    f"Cannot reach {db_host}:{db_port}. Check your VPN or network connection. Error: {e}"
+                )
+                return
+            else:
+                logger.warning(
+                    f"Could not reach {db_host} on default port 1433. Dynamic port resolution might still work via the ODBC driver. Proceeding... (Error: {e})"
+                )
+
+        logger.debug(
+            f"Connection URL: {connection_url.render_as_string(hide_password=True)}"
+        )
+        trial_inventory = query_to_df(connection_url, query, trial_code=trial_code)
         trial_inventory = extract_sampleid(trial_inventory)
         if not no_viable:
             trial_inventory = flag_viable(
@@ -373,29 +445,58 @@ async def main(
         logging.info(
             f"{len(trial_inventory)} {trial_code} records saved to {final_parquet_file_path.absolute()} with {parquet_compression} compression."
         )
+
+        # Download inventory history
+        if download_history:
+            history_sql_file = Path(sql_file).parent / "inventory_history.sql"
+            if history_sql_file.exists():
+                logger.info(f"Downloading history for {trial_code}...")
+                history_query = parse_sql_file(history_sql_file)
+                if history_query:
+                    history_df = query_to_df(
+                        connection_url, history_query, trial_code=trial_code
+                    )
+                    # Create history filename with '_history' suffix
+                    history_parquet_file_name = (
+                        final_parquet_file_path.stem + "_history.parquet"
+                    )
+                    history_parquet_file_path = (
+                        final_parquet_file_path.parent / history_parquet_file_name
+                    )
+
+                    history_df.to_parquet(
+                        history_parquet_file_path, compression=parquet_compression
+                    )
+                    logging.info(
+                        f"{len(history_df)} history records for {trial_code} saved to {history_parquet_file_path.absolute()}."
+                    )
+                else:
+                    logger.warning("History query was empty.")
+            else:
+                logger.warning(f"History SQL file not found: {history_sql_file}")
+
     except Exception as e:
         logger.error(f"Error processing trial inventory: {e}")
 
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(
-        main(
-            db_host=args.db_host,
-            db_name=args.db_name,
-            db_port=args.db_port,
-            db_user=args.db_user,
-            db_password=args.db_password,
-            sql_file=args.sql_file,
-            trial_code=args.trial_code,
-            output_dir=args.output_dir,
-            add_trial_to_path=args.add_trial_to_path,
-            include_dsn_in_filename=args.include_dsn_in_filename,
-            no_viable=args.no_viable,
-            exclude_conditions=args.exclude_conditions,
-            exclude_matcodes=args.exclude_matcodes,
-            parquet_compression=args.parquet_compression,
-            db_driver=args.db_driver,
-            debug=args.debug,
-        )
+    main(
+        db_host=args.db_host,
+        db_name=args.db_name,
+        db_port=args.db_port,
+        db_user=args.db_user,
+        db_password=args.db_password,
+        sql_file=args.sql_file,
+        trial_code=args.trial_code,
+        output_dir=args.output_dir,
+        add_trial_to_path=args.add_trial_to_path,
+        include_dsn_in_filename=args.include_dsn_in_filename,
+        no_viable=args.no_viable,
+        exclude_conditions=args.exclude_conditions,
+        exclude_matcodes=args.exclude_matcodes,
+        parquet_compression=args.parquet_compression,
+        db_driver=args.db_driver,
+        debug=args.debug,
+        download_history=args.download_history,
     )
