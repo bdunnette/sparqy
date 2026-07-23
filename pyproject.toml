@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "django-environ>=0.14.0",
-    "pandas[compression,parquet,performance,sql-other]==3.0.3",
+    "pandas[compression,parquet,performance,sql-other]==3.0.5",
     "pyodbc>=5.2.0",
     "python-dotenv>=1.1.1",
     "python-slugify>=8.0.4",
@@ -15,7 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "prek>=0.4.5",
+    "prek>=0.4.10",
     "pytest>=9.1.1",
 ]
 
